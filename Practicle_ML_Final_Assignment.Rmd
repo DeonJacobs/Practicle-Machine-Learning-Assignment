@@ -1,0 +1,153 @@
+---
+title: "Practical Machine Learning Assignment"
+author: "Deon Jacobs"
+date: "14 May 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+## Human Activity Recognition Model Generation
+
+###Overview
+A machine learning model is generated from the PML dataset generously provided by http://groupware.les.inf.puc-rio.br/har: 
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+Using measurements of several weight lifting exercises, models are tuned to discern which sets are done correctly, and which are not.
+
+The supplied training and test datasets are loaded. The training set is again divided into a sub-training and sub-test set. Cross-validation is implemented on the sub-training and -test sets. Models are generated from the sub-training set, and the most accurate model selected from the sub-test set using the OsSE (Out of Sample Error) estimations. The selected ML model is then used to predict 20 various test cases.
+
+###Required R-packages
+
+```{r}
+library(dplyr)
+library(caret)
+library(kernlab)
+library(randomForest)
+library(rpart)
+library(gbm)
+```
+
+###Load PML Training and Test Dataset
+
+```{r, warning=FALSE, cache=TRUE}
+#Read training set data
+setwd("C:\\Users\\Family\\Documents\\Data Science Specialisation\\Machine Learning")
+
+# Read CSV into R
+TrainData <- read.csv(file="pml-training.csv", header=TRUE, sep=",")
+TestData <- read.csv(file="pml-testing.csv", header=TRUE, sep=",")
+```
+
+###Cross-Validation
+
+Split original training set into sub-training and -test set. Transformations performed on new train set are also applied to test set:
+
+```{r, warning=FALSE, cache=TRUE}
+inTrain <- createDataPartition(y=TrainData$classe,p=0.7,list=FALSE)
+
+newTrain <- TrainData[inTrain,]
+newTest  <- TrainData[-inTrain,]
+
+dim(newTrain)
+dim(newTest)
+dim(TestData)
+```
+
+###Pre-Processing
+
+Remove observed columns which will not contribute to model training and prediction: 
+X, user_name,	raw_timestamp_part_1,	raw_timestamp_part_2,	cvtd_timestamp,	new_window,	num_window.
+
+```{r, warning=FALSE, cache=TRUE}
+newTrain <- newTrain[,-c(1:7)]
+newTest <- newTest[,-c(1:7)]
+TestData <- TestData[,-c(1:7)]
+```
+Remove columns with row values containing NAs base on newTrain set
+```{r, warning=FALSE, cache=TRUE}
+naColumns <- sapply(newTrain,function(x) !any(is.na(x)))
+
+newTrain <- newTrain[,naColumns]
+newTest  <- newTest[,naColumns]
+TestData  <- TestData[,naColumns]
+```
+Remove columns with near zero variance
+```{r, warning=FALSE, cache=TRUE}
+nzvColumns <- nearZeroVar(newTrain)
+ 
+newTrain <- newTrain[,-nzvColumns]
+newTest <- newTest[,-nzvColumns]
+TestData <- TestData[,-nzvColumns]
+```
+Review of columns removed from the dataset
+```{r, warning=FALSE, cache=TRUE}
+dim(newTrain)
+dim(newTest)
+dim(TestData)
+```
+
+###Model Selection
+The exercise training data set does not suit linear regression prediction models.
+
+Instead non-linear machine learning techniques are used to train and compare model performance:
+1. Decision Tree
+2. Random Forest
+3. Gradient Boosting Machine
+
+Once models are trained using appropriate resampling techniques on the training data, predictions are run on the  Classe variable for each using the sub-training data set. The model with best OoSE estimation is selected to run the final 20 test cases.  
+
+####Decision Trees
+Iteratively split variables into groups, evaluate "homogeneity" within each group. Split again if necessary.
+```{r, warning=FALSE, cache=TRUE}
+set.seed(3640)
+TreeModFit <- train(classe ~ .,method="rpart",data=newTrain)
+plot(TreeModFit$finalModel,uniform=TRUE, main="Classification Tree")
+text(TreeModFit$finalModel,use.n=TRUE, all=TRUE, cex=0.8)
+#Predict Classe variable from Training set ussing Decission Trees Model:
+TreePredict <- predict(TreeModFit,newdata=newTest)
+
+```
+####Random Forests
+Bootstrap samples, at each split, bootstrap variables, grow multiple trees and vote.
+```{r, warning=FALSE, cache=TRUE}
+set.seed(3640)
+RFControl <- trainControl(method="oob", number=10, repeats=1)
+RFModelFit <- train(classe~.,method="rf",data=newTrain,trControl=RFControl)
+#Predict Classe variable from Training set using Random Forest Model:
+RFPredict <- predict(RFModelFit,newdata=newTest)
+
+```
+####Boosting
+Take lots of (possibly) weak predictors, weight them and add them up, get a stronger predictor.
+```{r, warning=FALSE, cache=TRUE}
+set.seed(3640)
+BMControl <- trainControl(method="repeatedcv", number=10,repeats=1)
+BModelFit <- train(classe~.,method="gbm",data=newTrain,verbose=FALSE,trControl=BMControl)
+#Predict Classe variable from Training set using Boosting Model:
+BPredict <- predict(BModelFit,newdata=newTest)
+```
+
+####Model Accuracy Results
+```{r, warning=FALSE, cache=TRUE}
+confusionMatrix(TreePredict,newTest$classe)
+confusionMatrix(RFPredict,newTest$classe)
+confusionMatrix(BPredict,newTest$classe)
+```
+
+The Random Forest ML model achieved the best OoSE accuracy of 0.9918, and will be selected against the 20 test cases. 
+
+####Predict outcome of initial training data set using the Random Forest ML model
+
+```{r, warning=FALSE, cache=TRUE}
+TestRFPredict <- predict(RFModelFit,newdata=TestData)
+TestRFPredict
+
+```
